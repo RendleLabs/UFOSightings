@@ -7,6 +7,7 @@ public class KeyHackImpl
 {
     public static Dictionary<string, int> Run()
     {
+        string str;
         var keys = new Dictionary<int, string>();
         var dict = new Dictionary<int, int>();
         var buffer = new byte[1024 * 1024];
@@ -36,6 +37,7 @@ public class KeyHackImpl
                 {
                     break;
                 }
+                str = Encoding.UTF8.GetString(line);
                 var key = GetIntKey(line);
                 if (key == 0) break;
                 CollectionsMarshal.GetValueRefOrAddDefault(dict, key, out var exists) += 1;
@@ -46,6 +48,7 @@ public class KeyHackImpl
             }
 
             var lastChunk = chunk[last];
+            str = Encoding.UTF8.GetString(lastChunk);
             lastChunk.CopyTo(bufferSpan);
             read = lastChunk.Length + stream.Read(bufferSpan.Slice(lastChunk.Length));
         }
@@ -78,8 +81,27 @@ public class KeyHackImpl
         var country = line[ranges.Current];
 
         Span<byte> bytes = stackalloc byte[4];
-        state.CopyTo(bytes);
-        country.CopyTo(bytes.Slice(2));
+        
+        if (state.Length > 0)
+        {
+            state.CopyTo(bytes);
+        }
+        else
+        {
+            bytes[0] = (byte)'_';
+            bytes[1] = (byte)'_';
+        }
+        
+        if (country.Length > 0)
+        {
+            country.CopyTo(bytes.Slice(2));
+        }
+        else
+        {
+            bytes[2] = (byte)'_';
+            bytes[3] = (byte)'_';
+        }
+
         return MemoryMarshal.Read<int>(bytes);
     }
 }
