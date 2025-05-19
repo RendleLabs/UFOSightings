@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -5,55 +6,63 @@ namespace UFO;
 
 public class KeyHackImpl
 {
+    private static readonly ArrayPool<byte> BytePool = ArrayPool<byte>.Shared;
+    
     public static Dictionary<string, int> Run()
     {
-        string str;
+        // string str;
         var keys = new Dictionary<int, string>();
         var dict = new Dictionary<int, int>();
-        var buffer = new byte[1024 * 1024];
-        var bufferSpan = buffer.AsSpan();
-        
-        using var stream = File.OpenRead("/Users/rendle/workshop/NDCOslo2025/UFO/ufo_sightings_original.csv");
+        var buffer = BytePool.Rent(1024 * 1024); // new byte[1024 * 1024];
 
-        int read = stream.Read(bufferSpan);
-        bool skip = true;
-
-        while (read > 0)
+        try
         {
-            ReadOnlySpan<byte> chunk = bufferSpan.Slice(0, read);
+            var bufferSpan = buffer.AsSpan();
+        
+            using var stream = File.OpenRead("/Users/rendle/workshop/NDCOslo2025/UFO/ufo_sightings_original.csv");
 
-            var lineRanges = chunk.Split((byte)'\n');
-            if (skip)
+            int read = stream.Read(bufferSpan);
+            bool skip = true;
+
+            while (read > 0)
             {
-                lineRanges.MoveNext();
-                skip = false;
-            }
-            Range last = default;
-            while (lineRanges.MoveNext())
-            {
-                last = lineRanges.Current;
-                var line = chunk[lineRanges.Current];
-                if (line.Length == 0)
+                ReadOnlySpan<byte> chunk = bufferSpan.Slice(0, read);
+
+                var lineRanges = chunk.Split((byte)'\n');
+                if (skip)
                 {
-                    break;
+                    lineRanges.MoveNext();
+                    skip = false;
                 }
-                str = Encoding.UTF8.GetString(line);
-                var key = GetIntKey(line);
-                if (key == 0) break;
-                CollectionsMarshal.GetValueRefOrAddDefault(dict, key, out var exists) += 1;
-                if (!exists)
+                Range last = default;
+                while (lineRanges.MoveNext())
                 {
-                    keys[key] = GetKey(line) ?? "";
+                    last = lineRanges.Current;
+                    var line = chunk[lineRanges.Current];
+                    if (line.Length == 0)
+                    {
+                        break;
+                    }
+                    var key = GetIntKey(line);
+                    if (key == 0) break;
+                    CollectionsMarshal.GetValueRefOrAddDefault(dict, key, out var exists) += 1;
+                    if (!exists)
+                    {
+                        keys[key] = GetKey(line) ?? "";
+                    }
                 }
+
+                var lastChunk = chunk[last];
+                lastChunk.CopyTo(bufferSpan);
+                read = lastChunk.Length + stream.Read(bufferSpan.Slice(lastChunk.Length));
             }
 
-            var lastChunk = chunk[last];
-            str = Encoding.UTF8.GetString(lastChunk);
-            lastChunk.CopyTo(bufferSpan);
-            read = lastChunk.Length + stream.Read(bufferSpan.Slice(lastChunk.Length));
+            return dict.ToDictionary(k => keys[k.Key], v => v.Value);
         }
-
-        return dict.ToDictionary(k => keys[k.Key], v => v.Value);
+        finally
+        {
+            BytePool.Return(buffer);
+        }
     }
 
     private static string? GetKey(ReadOnlySpan<byte> line)
